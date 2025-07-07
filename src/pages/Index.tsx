@@ -1,29 +1,51 @@
 
 import React, { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { User, Session } from '@supabase/supabase-js';
 import AuthForm from '@/components/AuthForm';
 import TaskList from '@/components/TaskList';
 
 const Index = () => {
-  const [user, setUser] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is already logged in (localStorage persistence)
-    const savedUser = localStorage.getItem('taskapp_user');
-    if (savedUser) {
-      setUser(savedUser);
-    }
-    setIsLoading(false);
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setIsGuest(false); // Reset guest mode when auth state changes
+      }
+    );
+
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleLogin = (email: string) => {
-    setUser(email);
-    localStorage.setItem('taskapp_user', email);
+    // The actual login is handled by Supabase auth state change
+    // This is just for backward compatibility
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('taskapp_user');
+  const handleGuestLogin = () => {
+    setIsGuest(true);
+  };
+
+  const handleLogout = async () => {
+    if (isGuest) {
+      setIsGuest(false);
+    } else {
+      await supabase.auth.signOut();
+    }
   };
 
   if (isLoading) {
@@ -37,10 +59,14 @@ const Index = () => {
     );
   }
 
-  return user ? (
-    <TaskList userEmail={user} onLogout={handleLogout} />
+  return (user || isGuest) ? (
+    <TaskList 
+      userEmail={user?.email || 'Guest'} 
+      onLogout={handleLogout}
+      isGuest={isGuest}
+    />
   ) : (
-    <AuthForm onLogin={handleLogin} />
+    <AuthForm onLogin={handleLogin} onGuestLogin={handleGuestLogin} />
   );
 };
 

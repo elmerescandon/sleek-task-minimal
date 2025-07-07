@@ -1,8 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 interface Task {
   id: string;
@@ -14,14 +16,82 @@ interface Task {
 interface TaskListProps {
   userEmail: string;
   onLogout: () => void;
+  isGuest?: boolean;
 }
 
-const TaskList = ({ userEmail, onLogout }: TaskListProps) => {
+const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
 
-  const addTask = () => {
+  // Load tasks on component mount
+  useEffect(() => {
+    if (isGuest) {
+      // Load from localStorage for guest users
+      const savedTasks = localStorage.getItem('guest_tasks');
+      if (savedTasks) {
+        try {
+          const parsedTasks = JSON.parse(savedTasks).map((task: any) => ({
+            ...task,
+            createdAt: new Date(task.createdAt)
+          }));
+          setTasks(parsedTasks);
+        } catch (error) {
+          console.error('Error parsing saved tasks:', error);
+        }
+      }
+    } else {
+      // Load from Supabase for authenticated users
+      loadTasks();
+    }
+  }, [isGuest]);
+
+  // Save to localStorage whenever tasks change (for guest users)
+  useEffect(() => {
+    if (isGuest) {
+      localStorage.setItem('guest_tasks', JSON.stringify(tasks));
+    }
+  }, [tasks, isGuest]);
+
+  const loadTasks = async () => {
+    if (isGuest) return;
+    
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        toast({
+          title: "Error loading tasks",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else {
+        const formattedTasks = data.map(task => ({
+          id: task.id,
+          text: task.text,
+          completed: task.completed,
+          createdAt: new Date(task.created_at)
+        }));
+        setTasks(formattedTasks);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addTask = async () => {
     if (!newTaskText.trim()) return;
     
     const newTask: Task = {
@@ -30,20 +100,116 @@ const TaskList = ({ userEmail, onLogout }: TaskListProps) => {
       completed: false,
       createdAt: new Date()
     };
+
+    if (isGuest) {
+      // Add to local state for guest users
+      setTasks([newTask, ...tasks]);
+    } else {
+      // Add to Supabase for authenticated users
+      try {
+        const { error } = await supabase
+          .from('tasks')
+          .insert([{
+            text: newTask.text,
+            completed: newTask.completed
+          }]);
+
+        if (error) {
+          toast({
+            title: "Error adding task",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Reload tasks to get the correct ID from database
+        await loadTasks();
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to add task",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
     
-    setTasks([...tasks, newTask]);
     setNewTaskText('');
     setIsAdding(false);
   };
 
-  const toggleTask = (id: string) => {
-    setTasks(tasks.map(task => 
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ));
+  const toggleTask = async (id: string) => {
+    const taskToUpdate = tasks.find(task => task.id === id);
+    if (!taskToUpdate) return;
+
+    const updatedTask = { ...taskToUpdate, completed: !taskToUpdate.completed };
+
+    if (isGuest) {
+      // Update local state for guest users
+      setTasks(tasks.map(task => 
+        task.id === id ? updatedTask : task
+      ));
+    } else {
+      // Update in Supabase for authenticated users
+      try {
+        const { error } = await supabase
+          .from('tasks')
+          .update({ completed: updatedTask.completed })
+          .eq('id', id);
+
+        if (error) {
+          toast({
+            title: "Error updating task",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        setTasks(tasks.map(task => 
+          task.id === id ? updatedTask : task
+        ));
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to update task",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(tasks.filter(task => task.id !== id));
+  const deleteTask = async (id: string) => {
+    if (isGuest) {
+      // Remove from local state for guest users
+      setTasks(tasks.filter(task => task.id !== id));
+    } else {
+      // Delete from Supabase for authenticated users
+      try {
+        const { error } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          toast({
+            title: "Error deleting task",
+            description: error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        setTasks(tasks.filter(task => task.id !== id));
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete task",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const cancelAdd = () => {
@@ -51,19 +217,32 @@ const TaskList = ({ userEmail, onLogout }: TaskListProps) => {
     setIsAdding(false);
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-500 text-sm">Loading tasks...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 px-8 py-6">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-light text-gray-900">Tasks</h1>
-            <p className="text-sm text-gray-500 mt-1">{userEmail}</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {userEmail} {isGuest && '(Guest - not saved)'}
+            </p>
           </div>
           <button
             onClick={onLogout}
             className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
           >
-            Sign out
+            {isGuest ? 'Exit Guest Mode' : 'Sign out'}
           </button>
         </div>
       </header>
@@ -155,6 +334,7 @@ const TaskList = ({ userEmail, onLogout }: TaskListProps) => {
               >
                 <Plus className="w-4 h-4" />
                 <span>Add task</span>
+              </span>
               </button>
             )}
           </div>
