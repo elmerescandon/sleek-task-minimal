@@ -107,12 +107,25 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
     } else {
       // Add to Supabase for authenticated users
       try {
+        // Get the current user
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          toast({
+            title: "Error",
+            description: "User not authenticated",
+            variant: "destructive",
+          });
+          return;
+        }
+
         const { error } = await supabase
           .from('tasks')
-          .insert([{
+          .insert({
             text: newTask.text,
-            completed: newTask.completed
-          }]);
+            completed: newTask.completed,
+            user_id: user.id
+          });
 
         if (error) {
           toast({
