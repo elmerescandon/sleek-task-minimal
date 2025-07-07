@@ -334,7 +334,6 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
               >
                 <Plus className="w-4 h-4" />
                 <span>Add task</span>
-              </span>
               </button>
             )}
           </div>
