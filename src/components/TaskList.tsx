@@ -57,7 +57,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
 
   const loadTasks = async () => {
     if (isGuest) return;
-    
+
     setIsLoading(true);
     try {
       const { data, error } = await supabase
@@ -93,7 +93,8 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
 
   const addTask = async () => {
     if (!newTaskText.trim()) return;
-    
+
+    // BUG: Using Date.now() for ID - rapid clicks get same timestamp!
     const newTask: Task = {
       id: Date.now().toString(),
       text: newTaskText.trim(),
@@ -102,14 +103,14 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
     };
 
     if (isGuest) {
-      // Add to local state for guest users
+      // BUG: No loading state - button stays clickable during state update
       setTasks([newTask, ...tasks]);
     } else {
       // Add to Supabase for authenticated users
       try {
         // Get the current user
         const { data: { user } } = await supabase.auth.getUser();
-        
+
         if (!user) {
           toast({
             title: "Error",
@@ -119,6 +120,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
           return;
         }
 
+        // BUG: No loading state set - button clickable during async operation!
         const { error } = await supabase
           .from('tasks')
           .insert({
@@ -136,7 +138,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
           return;
         }
 
-        // Reload tasks to get the correct ID from database
+        // BUG: This async call takes time - multiple clicks can happen before this completes!
         await loadTasks();
       } catch (error) {
         toast({
@@ -147,7 +149,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
         return;
       }
     }
-    
+
     setNewTaskText('');
     setIsAdding(false);
   };
@@ -160,7 +162,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
 
     if (isGuest) {
       // Update local state for guest users
-      setTasks(tasks.map(task => 
+      setTasks(tasks.map(task =>
         task.id === id ? updatedTask : task
       ));
     } else {
@@ -180,7 +182,7 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
           return;
         }
 
-        setTasks(tasks.map(task => 
+        setTasks(tasks.map(task =>
           task.id === id ? updatedTask : task
         ));
       } catch (error) {
@@ -290,11 +292,10 @@ const TaskList = ({ userEmail, onLogout, isGuest = false }: TaskListProps) => {
                       onChange={() => toggleTask(task.id)}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                     />
-                    <span className={`flex-1 text-base ${
-                      task.completed 
-                        ? 'text-gray-400 line-through' 
+                    <span className={`flex-1 text-base ${task.completed
+                        ? 'text-gray-400 line-through'
                         : 'text-gray-900'
-                    } transition-colors`}>
+                      } transition-colors`}>
                       {task.text}
                     </span>
                   </div>
